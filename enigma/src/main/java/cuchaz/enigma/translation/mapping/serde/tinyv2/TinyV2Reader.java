@@ -226,14 +226,27 @@ public final class TinyV2Reader implements MappingsReader {
 	}
 
 	private MappingPair<ClassEntry, RawEntryMapping> parseClass(String[] tokens, boolean escapeNames) {
-		ClassEntry obfuscatedEntry = new ClassEntry(unescapeOpt(tokens[1], escapeNames));
+		String token1 = unescapeOpt(tokens[1], escapeNames);
+		ClassEntry obfuscatedEntry = new ClassEntry(token1);
 
 		if (tokens.length <= 2) {
 			return new MappingPair<>(obfuscatedEntry);
 		}
 
 		String token2 = unescapeOpt(tokens[2], escapeNames);
-		String mapping = token2.substring(token2.lastIndexOf('$') + 1);
+		int seperatorCount = 0;
+
+		for (int i = token1.indexOf('$', 0); i != -1; i = token1.indexOf('$', i + 1)) {
+			seperatorCount++;
+		}
+
+		int index = 0;
+
+		while (seperatorCount-- != 0) {
+			index = token2.indexOf('$', index) + 1;
+		}
+
+		String mapping = token2.substring(index);
 		return new MappingPair<>(obfuscatedEntry, new RawEntryMapping(mapping));
 	}
 
