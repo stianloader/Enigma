@@ -6,7 +6,8 @@ import cuchaz.enigma.source.Decompilers;
 public enum Decompiler {
 	CFR("CFR", Decompilers.CFR),
 	PROCYON("Procyon", Decompilers.PROCYON),
-	BYTECODE("Bytecode", Decompilers.BYTECODE);
+	BYTECODE("Bytecode", Decompilers.BYTECODE),
+	TOKENIZING_DISASSEMBLER("Tokenizing Disassembler", Decompilers.TOKENIZING_DISASSEMBLER);
 
 	public final DecompilerService service;
 	public final String name;
