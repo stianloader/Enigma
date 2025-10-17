@@ -139,18 +139,28 @@ public class IndexReferenceVisitor extends ClassVisitor {
 		}
 
 		private ReferenceTargetType getReferenceTargetType(int stackDepth) {
+			if (this.stack == null) {
+				try {
+					throw new IllegalStateException("Instruction is unreachable!");
+				} catch (IllegalStateException e) {
+					e.printStackTrace();
+				}
+
+				return ReferenceTargetType.uninitialized();
+			}
+
 			if (stackDepth >= stack.size()) {
 				throw new IllegalStateException("Stack depth " + stackDepth + " is higher than the stack: " + stackValuesToString(stack) + " in method " + callerEntry);
 			}
 
 			Object stackValue = stack.get(stack.size() - 1 - stackDepth);
 
-			if (stackValue.equals(Opcodes.UNINITIALIZED_THIS) || stackValue instanceof Label) {
+			if (stackValue.equals(Opcodes.UNINITIALIZED_THIS) || stackValue instanceof Label || stackValue == Opcodes.NULL) {
 				return ReferenceTargetType.uninitialized();
 			}
 
 			if (!(stackValue instanceof String type)) {
-				throw new IllegalStateException("Illegal stack value in method " + callerEntry + ": " + stackValuesToString(List.of(stackValue)));
+				throw new IllegalStateException("Illegal stack value in method " + callerEntry + ": " + stackValuesToString(List.of(stackValue)) + " (class: " + stackValue.getClass().descriptorString() + ")");
 			}
 
 			if (type.startsWith("[")) {
