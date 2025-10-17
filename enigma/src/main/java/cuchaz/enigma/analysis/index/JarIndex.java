@@ -11,19 +11,21 @@
 
 package cuchaz.enigma.analysis.index;
 
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
-
-import com.google.common.collect.ArrayListMultimap;
-import com.google.common.collect.HashMultimap;
-import com.google.common.collect.ListMultimap;
-import com.google.common.collect.Multimap;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 
 import cuchaz.enigma.Enigma;
 import cuchaz.enigma.ProgressListener;
 import cuchaz.enigma.analysis.ReferenceTargetType;
+import cuchaz.enigma.api.view.index.JarIndexView;
+import cuchaz.enigma.classprovider.AddFramesIfNecessaryClassProvider;
+import cuchaz.enigma.classprovider.CachingClassProvider;
 import cuchaz.enigma.classprovider.ClassProvider;
 import cuchaz.enigma.translation.mapping.EntryResolver;
 import cuchaz.enigma.translation.mapping.IndexEntryResolver;
@@ -37,7 +39,7 @@ import cuchaz.enigma.translation.representation.entry.MethodEntry;
 import cuchaz.enigma.translation.representation.entry.ParentedEntry;
 import cuchaz.enigma.utils.I18n;
 
-public class JarIndex implements JarIndexer {
+public class JarIndex implements JarIndexer, JarIndexView {
 	private final Set<String> indexedClasses = new HashSet<>();
 	private final EntryIndex entryIndex;
 	private final InheritanceIndex inheritanceIndex;
@@ -48,8 +50,7 @@ public class JarIndex implements JarIndexer {
 
 	private final Collection<JarIndexer> indexers;
 
-	private final Multimap<String, MethodDefEntry> methodImplementations = HashMultimap.create();
-	private final ListMultimap<ClassEntry, ParentedEntry> childrenByClass;
+	private final ConcurrentMap<ClassEntry, List<ParentedEntry<?>>> childrenByClass;
 
 	public JarIndex(EntryIndex entryIndex, InheritanceIndex inheritanceIndex, ReferenceIndex referenceIndex, BridgeMethodIndex bridgeMethodIndex, PackageVisibilityIndex packageVisibilityIndex) {
 		this.entryIndex = entryIndex;
@@ -59,7 +60,7 @@ public class JarIndex implements JarIndexer {
 		this.packageVisibilityIndex = packageVisibilityIndex;
 		this.indexers = List.of(entryIndex, inheritanceIndex, referenceIndex, bridgeMethodIndex, packageVisibilityIndex);
 		this.entryResolver = new IndexEntryResolver(this);
-		this.childrenByClass = ArrayListMultimap.create();
+		this.childrenByClass = new ConcurrentHashMap<>();
 	}
 
 	public static JarIndex empty() {
@@ -71,31 +72,35 @@ public class JarIndex implements JarIndexer {
 		return new JarIndex(entryIndex, inheritanceIndex, referenceIndex, bridgeMethodIndex, packageVisibilityIndex);
 	}
 
-	public void indexJar(Set<String> classNames, ClassProvider classProvider, ProgressListener progress) {
+	public ClassProvider indexJar(Set<String> classNames, ClassProvider classProvider, ProgressListener progress) {
 		indexedClasses.addAll(classNames);
 		progress.init(4, I18n.translate("progress.jar.indexing"));
 
 		progress.step(1, I18n.translate("progress.jar.indexing.entries"));
 
-		for (String className : classNames) {
+		classNames.parallelStream().forEach(className -> {
 			classProvider.get(className).accept(new IndexClassVisitor(this, Enigma.ASM_VERSION));
-		}
+		});
+
+		ClassProvider classProviderWithFrames = new CachingClassProvider(new AddFramesIfNecessaryClassProvider(classProvider, entryIndex));
 
 		progress.step(2, I18n.translate("progress.jar.indexing.references"));
 
-		for (String className : classNames) {
+		classNames.parallelStream().forEach(className -> {
 			try {
-				classProvider.get(className).accept(new IndexReferenceVisitor(this, entryIndex, inheritanceIndex, Enigma.ASM_VERSION));
+				classProviderWithFrames.get(className).accept(new IndexReferenceVisitor(this, Enigma.ASM_VERSION));
 			} catch (Exception e) {
 				throw new RuntimeException("Exception while indexing class: " + className, e);
 			}
-		}
+		});
 
 		progress.step(3, I18n.translate("progress.jar.indexing.methods"));
 		bridgeMethodIndex.findBridgeMethods();
 
 		progress.step(4, I18n.translate("progress.jar.indexing.process"));
 		processIndex(this);
+
+		return classProviderWithFrames;
 	}
 
 	@Override
@@ -118,7 +123,7 @@ public class JarIndex implements JarIndexer {
 		indexers.forEach(indexer -> indexer.indexClass(classEntry));
 
 		if (classEntry.isInnerClass() && !classEntry.getAccess().isSynthetic()) {
-			childrenByClass.put(classEntry.getParent(), classEntry);
+			synchronizedAdd(childrenByClass, classEntry.getParent(), classEntry);
 		}
 	}
 
@@ -131,7 +136,7 @@ public class JarIndex implements JarIndexer {
 		indexers.forEach(indexer -> indexer.indexField(fieldEntry));
 
 		if (!fieldEntry.getAccess().isSynthetic()) {
-			childrenByClass.put(fieldEntry.getParent(), fieldEntry);
+			synchronizedAdd(childrenByClass, fieldEntry.getParent(), fieldEntry);
 		}
 	}
 
@@ -144,12 +149,17 @@ public class JarIndex implements JarIndexer {
 		indexers.forEach(indexer -> indexer.indexMethod(methodEntry));
 
 		if (!methodEntry.getAccess().isSynthetic() && !methodEntry.getName().equals("<clinit>")) {
-			childrenByClass.put(methodEntry.getParent(), methodEntry);
+			synchronizedAdd(childrenByClass, methodEntry.getParent(), methodEntry);
+		}
+	}
+
+	@Override
+	public void indexClassReference(MethodDefEntry callerEntry, ClassEntry referencedEntry, ReferenceTargetType targetType) {
+		if (callerEntry.getParent().isJre()) {
+			return;
 		}
 
-		if (!methodEntry.isConstructor()) {
-			methodImplementations.put(methodEntry.getParent().getFullName(), methodEntry);
-		}
+		indexers.forEach(indexer -> indexer.indexClassReference(callerEntry, referencedEntry, targetType));
 	}
 
 	@Override
@@ -179,14 +189,17 @@ public class JarIndex implements JarIndexer {
 		indexers.forEach(indexer -> indexer.indexLambda(callerEntry, lambda, targetType));
 	}
 
+	@Override
 	public EntryIndex getEntryIndex() {
 		return entryIndex;
 	}
 
+	@Override
 	public InheritanceIndex getInheritanceIndex() {
 		return this.inheritanceIndex;
 	}
 
+	@Override
 	public ReferenceIndex getReferenceIndex() {
 		return referenceIndex;
 	}
@@ -203,11 +216,18 @@ public class JarIndex implements JarIndexer {
 		return entryResolver;
 	}
 
-	public ListMultimap<ClassEntry, ParentedEntry> getChildrenByClass() {
+	public Map<ClassEntry, List<ParentedEntry<?>>> getChildrenByClass() {
 		return this.childrenByClass;
 	}
 
 	public boolean isIndexed(String internalName) {
 		return indexedClasses.contains(internalName);
+	}
+
+	static <K, V> void synchronizedAdd(ConcurrentMap<K, List<V>> map, K key, V value) {
+		List<V> list = map.computeIfAbsent(key, k -> new ArrayList<>());
+		synchronized (list) {
+			list.add(value);
+		}
 	}
 }

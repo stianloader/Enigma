@@ -20,13 +20,13 @@ import java.util.EnumSet;
 import java.util.List;
 import java.util.Set;
 
-import com.google.common.io.MoreFiles;
 import joptsimple.OptionException;
 import joptsimple.OptionParser;
 import joptsimple.OptionSet;
 import joptsimple.OptionSpec;
 import joptsimple.ValueConverter;
 
+import cuchaz.enigma.Enigma;
 import cuchaz.enigma.EnigmaProfile;
 import cuchaz.enigma.gui.config.Themes;
 import cuchaz.enigma.gui.config.UiConfig;
@@ -38,7 +38,8 @@ public class Main {
 	public static void main(String[] args) throws IOException {
 		OptionParser parser = new OptionParser();
 
-		OptionSpec<Path> jar = parser.accepts("jar", "Jar file to open at startup").withRequiredArg().withValuesConvertedBy(PathConverter.INSTANCE);
+		OptionSpec<Path> jar = parser.accepts("jar", "Jar file to open at startup; if there are multiple jars, the order must be the same between all collab session members").withRequiredArg().withValuesConvertedBy(PathConverter.INSTANCE);
+		OptionSpec<Path> library = parser.accepts("library", "The libraries for the input jar files").withRequiredArg().withValuesConvertedBy(PathConverter.INSTANCE);
 
 		OptionSpec<Path> mappings = parser.accepts("mappings", "Mappings file to open at startup").withRequiredArg().withValuesConvertedBy(PathConverter.INSTANCE);
 
@@ -101,8 +102,9 @@ public class Main {
 			}
 
 			EnigmaProfile parsedProfile = EnigmaProfile.read(options.valueOf(profile));
+			Enigma enigma = Enigma.builder().setProfile(parsedProfile).build();
 
-			I18n.setLanguage(UiConfig.getLanguage());
+			I18n.setLanguage(UiConfig.getLanguage(), enigma.getServices());
 
 			// Provide fallback anti-aliasing for desktop environments the JRE doesn't recognize
 			if (Toolkit.getDefaultToolkit().getDesktopProperty("awt.font.desktophints") == null) {
@@ -117,7 +119,7 @@ public class Main {
 
 			Themes.setupTheme();
 
-			Gui gui = new Gui(parsedProfile, editables);
+			Gui gui = new Gui(enigma, editables);
 			GuiController controller = gui.getController();
 
 			if (options.has("single-class-tree")) {
@@ -137,15 +139,14 @@ public class Main {
 			}
 
 			if (options.has(jar)) {
-				Path jarPath = options.valueOf(jar);
-				controller.openJar(jarPath).whenComplete((v, t) -> {
+				List<Path> jarPaths = options.valuesOf(jar);
+				List<Path> libraryPaths = options.valuesOf(library);
+				controller.openJar(jarPaths, libraryPaths).whenComplete((v, t) -> {
 					if (options.has(mappings)) {
 						Path mappingsPath = options.valueOf(mappings);
 
 						if (Files.isDirectory(mappingsPath)) {
 							controller.openMappings(MappingFormat.ENIGMA_DIRECTORY, mappingsPath);
-						} else if ("zip".equalsIgnoreCase(MoreFiles.getFileExtension(mappingsPath))) {
-							controller.openMappings(MappingFormat.ENIGMA_ZIP, mappingsPath);
 						} else {
 							controller.openMappings(MappingFormat.ENIGMA_FILE, mappingsPath);
 						}

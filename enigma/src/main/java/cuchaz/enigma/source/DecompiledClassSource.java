@@ -6,12 +6,13 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
-import javax.annotation.Nullable;
+import org.jetbrains.annotations.Nullable;
 
 import cuchaz.enigma.EnigmaProject;
 import cuchaz.enigma.EnigmaServices;
 import cuchaz.enigma.analysis.EntryReference;
 import cuchaz.enigma.api.service.NameProposalService;
+import cuchaz.enigma.api.service.ObfuscationTestService;
 import cuchaz.enigma.translation.LocalNameGenerator;
 import cuchaz.enigma.translation.TranslateResult;
 import cuchaz.enigma.translation.Translator;
@@ -72,7 +73,11 @@ public class DecompiledClassSource {
 					return proposedName.get();
 				}
 
-				target.add(RenamableTokenType.OBFUSCATED, movedToken);
+				if (isUnobfuscated(project, entry)) {
+					target.add(RenamableTokenType.UNOBFUSCATED, movedToken);
+				} else {
+					target.add(RenamableTokenType.OBFUSCATED, movedToken);
+				}
 			}
 		}
 
@@ -94,6 +99,12 @@ public class DecompiledClassSource {
 
 			return resolved.stream().map(e -> nameProposalService.proposeName(e, mapper)).filter(Optional::isPresent).map(Optional::get);
 		}).findFirst();
+	}
+
+	private static boolean isUnobfuscated(EnigmaProject project, Entry<?> entry) {
+		EnigmaServices services = project.getEnigma().getServices();
+
+		return services.get(ObfuscationTestService.TYPE).stream().anyMatch(service -> service.testDeobfuscated(entry));
 	}
 
 	@Nullable

@@ -1,16 +1,15 @@
 package cuchaz.enigma.analysis.index;
 
+import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-
-import com.google.common.collect.HashMultimap;
-import com.google.common.collect.Lists;
-import com.google.common.collect.Maps;
-import com.google.common.collect.Sets;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 
 import cuchaz.enigma.analysis.EntryReference;
 import cuchaz.enigma.analysis.ReferenceTargetType;
@@ -46,19 +45,25 @@ public class PackageVisibilityIndex implements JarIndexer {
 		return true;
 	}
 
-	private final HashMultimap<ClassEntry, ClassEntry> connections = HashMultimap.create();
-	private final List<Set<ClassEntry>> partitions = Lists.newArrayList();
-	private final Map<ClassEntry, Set<ClassEntry>> classPartitions = Maps.newHashMap();
+	private final ConcurrentMap<ClassEntry, List<ClassEntry>> connections = new ConcurrentHashMap<>();
+	private final List<Set<ClassEntry>> partitions = new ArrayList<>();
+	private final Map<ClassEntry, Set<ClassEntry>> classPartitions = new HashMap<>();
 
 	private void addConnection(ClassEntry classA, ClassEntry classB) {
 		if (classA != classB) {
-			connections.put(classA, classB);
-			connections.put(classB, classA);
+			JarIndex.synchronizedAdd(connections, classA, classB);
+			JarIndex.synchronizedAdd(connections, classB, classA);
 		}
 	}
 
 	private void buildPartition(Set<ClassEntry> unassignedClasses, Set<ClassEntry> partition, ClassEntry member) {
-		for (ClassEntry connected : connections.get(member)) {
+		List<ClassEntry> memberConnections = connections.get(member);
+
+		if (memberConnections == null) {
+			return;
+		}
+
+		for (ClassEntry connected : memberConnections) {
 			if (unassignedClasses.remove(connected)) {
 				partition.add(connected);
 				buildPartition(unassignedClasses, partition, connected);
@@ -67,7 +72,7 @@ public class PackageVisibilityIndex implements JarIndexer {
 	}
 
 	private void addConnections(EntryIndex entryIndex, ReferenceIndex referenceIndex, InheritanceIndex inheritanceIndex) {
-		for (FieldEntry entry : entryIndex.getFields()) {
+		entryIndex.getFields().parallelStream().forEach(entry -> {
 			AccessFlags entryAcc = entryIndex.getFieldAccess(entry);
 
 			if (!entryAcc.isPublic() && !entryAcc.isPrivate()) {
@@ -77,9 +82,9 @@ public class PackageVisibilityIndex implements JarIndexer {
 					}
 				}
 			}
-		}
+		});
 
-		for (MethodEntry entry : entryIndex.getMethods()) {
+		entryIndex.getMethods().parallelStream().forEach(entry -> {
 			AccessFlags entryAcc = entryIndex.getMethodAccess(entry);
 
 			if (!entryAcc.isPublic() && !entryAcc.isPrivate()) {
@@ -89,9 +94,9 @@ public class PackageVisibilityIndex implements JarIndexer {
 					}
 				}
 			}
-		}
+		});
 
-		for (ClassEntry entry : entryIndex.getClasses()) {
+		entryIndex.getClasses().parallelStream().forEach(entry -> {
 			AccessFlags entryAcc = entryIndex.getClassAccess(entry);
 
 			if (!entryAcc.isPublic() && !entryAcc.isPrivate()) {
@@ -121,18 +126,18 @@ public class PackageVisibilityIndex implements JarIndexer {
 			if (outerClass != null) {
 				addConnection(entry, outerClass);
 			}
-		}
+		});
 	}
 
 	private void addPartitions(EntryIndex entryIndex) {
-		Set<ClassEntry> unassignedClasses = Sets.newHashSet(entryIndex.getClasses());
+		Set<ClassEntry> unassignedClasses = new HashSet<>(entryIndex.getClasses());
 
 		while (!unassignedClasses.isEmpty()) {
 			Iterator<ClassEntry> iterator = unassignedClasses.iterator();
 			ClassEntry initialEntry = iterator.next();
 			iterator.remove();
 
-			HashSet<ClassEntry> partition = Sets.newHashSet();
+			HashSet<ClassEntry> partition = new HashSet<>();
 			partition.add(initialEntry);
 			buildPartition(unassignedClasses, partition, initialEntry);
 			partitions.add(partition);

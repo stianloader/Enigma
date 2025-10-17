@@ -13,17 +13,16 @@ package cuchaz.enigma.translation.representation.entry;
 
 import java.util.Objects;
 
-import javax.annotation.Nonnull;
+import org.jetbrains.annotations.NotNull;
 
-import com.google.common.base.Preconditions;
-
+import cuchaz.enigma.api.view.entry.MethodEntryView;
 import cuchaz.enigma.source.RenamableTokenType;
 import cuchaz.enigma.translation.TranslateResult;
 import cuchaz.enigma.translation.Translator;
 import cuchaz.enigma.translation.mapping.EntryMapping;
 import cuchaz.enigma.translation.representation.MethodDescriptor;
 
-public class MethodEntry extends ParentedEntry<ClassEntry> implements Comparable<MethodEntry> {
+public class MethodEntry extends ParentedEntry<ClassEntry> implements Comparable<MethodEntry>, MethodEntryView {
 	protected final MethodDescriptor descriptor;
 
 	public MethodEntry(ClassEntry parent, String name, MethodDescriptor descriptor) {
@@ -31,12 +30,9 @@ public class MethodEntry extends ParentedEntry<ClassEntry> implements Comparable
 	}
 
 	public MethodEntry(ClassEntry parent, String name, MethodDescriptor descriptor, String javadocs) {
-		super(parent, name, javadocs);
+		super(Objects.requireNonNull(parent, "Parent cannot be null"), name, javadocs);
 
-		Preconditions.checkNotNull(parent, "Parent cannot be null");
-		Preconditions.checkNotNull(descriptor, "Method descriptor cannot be null");
-
-		this.descriptor = descriptor;
+		this.descriptor = Objects.requireNonNull(descriptor, "Method descriptor cannot be null");
 	}
 
 	public static MethodEntry parse(String owner, String name, String desc) {
@@ -52,12 +48,17 @@ public class MethodEntry extends ParentedEntry<ClassEntry> implements Comparable
 		return this.descriptor;
 	}
 
+	@Override
+	public String getDescriptor() {
+		return descriptor.toString();
+	}
+
 	public boolean isConstructor() {
 		return name.equals("<init>") || name.equals("<clinit>");
 	}
 
 	@Override
-	protected TranslateResult<? extends MethodEntry> extendedTranslate(Translator translator, @Nonnull EntryMapping mapping) {
+	protected TranslateResult<? extends MethodEntry> extendedTranslate(Translator translator, @NotNull EntryMapping mapping) {
 		String translatedName = mapping.targetName() != null ? mapping.targetName() : name;
 		String docs = mapping.javadoc();
 		return TranslateResult.of(mapping.targetName() == null ? RenamableTokenType.OBFUSCATED : RenamableTokenType.DEOBFUSCATED, new MethodEntry(parent, translatedName, translator.translate(descriptor), docs));
@@ -65,6 +66,10 @@ public class MethodEntry extends ParentedEntry<ClassEntry> implements Comparable
 
 	@Override
 	public MethodEntry withName(String name) {
+		return new MethodEntry(parent, name, descriptor, javadocs);
+	}
+
+	public MethodEntry withDesc(MethodDescriptor descriptor) {
 		return new MethodEntry(parent, name, descriptor, javadocs);
 	}
 

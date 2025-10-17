@@ -5,7 +5,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.stream.Stream;
 
-import javax.annotation.Nonnull;
+import org.jetbrains.annotations.NotNull;
 
 import cuchaz.enigma.analysis.index.JarIndex;
 import cuchaz.enigma.translation.MappingTranslator;
@@ -50,15 +50,15 @@ public class EntryRemapper {
 		return new EntryRemapper(index, new HashEntryTree<>());
 	}
 
-	public void validatePutMapping(ValidationContext vc, Entry<?> obfuscatedEntry, @Nonnull EntryMapping deobfMapping) {
+	public void validatePutMapping(ValidationContext vc, Entry<?> obfuscatedEntry, @NotNull EntryMapping deobfMapping) {
 		doPutMapping(vc, obfuscatedEntry, deobfMapping, true);
 	}
 
-	public void putMapping(ValidationContext vc, Entry<?> obfuscatedEntry, @Nonnull EntryMapping deobfMapping) {
-		doPutMapping(vc, obfuscatedEntry, deobfMapping, false);
+	public boolean putMapping(ValidationContext vc, Entry<?> obfuscatedEntry, @NotNull EntryMapping deobfMapping) {
+		return doPutMapping(vc, obfuscatedEntry, deobfMapping, false);
 	}
 
-	private void doPutMapping(ValidationContext vc, Entry<?> obfuscatedEntry, @Nonnull EntryMapping deobfMapping, boolean validateOnly) {
+	private boolean doPutMapping(ValidationContext vc, Entry<?> obfuscatedEntry, @NotNull EntryMapping deobfMapping, boolean validateOnly) {
 		if (obfuscatedEntry instanceof FieldEntry) {
 			FieldEntry fieldEntry = (FieldEntry) obfuscatedEntry;
 			ClassEntry classEntry = fieldEntry.getParent();
@@ -77,7 +77,7 @@ public class EntryRemapper {
 		}
 
 		if (validateOnly || !vc.canProceed()) {
-			return;
+			return false;
 		}
 
 		for (Entry<?> resolvedEntry : resolvedEntries) {
@@ -87,6 +87,8 @@ public class EntryRemapper {
 				obfToDeobf.insert(resolvedEntry, deobfMapping);
 			}
 		}
+
+		return true;
 	}
 
 	// A little bit of a hack to also map the getter method for record fields.
@@ -117,7 +119,7 @@ public class EntryRemapper {
 		doPutMapping(vc, methodEntry, new EntryMapping(fieldMapping.targetName()), false);
 	}
 
-	@Nonnull
+	@NotNull
 	public EntryMapping getDeobfMapping(Entry<?> entry) {
 		EntryMapping entryMapping = obfToDeobf.get(entry);
 		return entryMapping == null ? EntryMapping.DEFAULT : entryMapping;

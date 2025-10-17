@@ -2,10 +2,9 @@ package cuchaz.enigma.translation.representation.entry;
 
 import java.util.Objects;
 
-import javax.annotation.Nonnull;
+import org.jetbrains.annotations.NotNull;
 
-import com.google.common.base.Preconditions;
-
+import cuchaz.enigma.api.view.entry.LocalVariableEntryView;
 import cuchaz.enigma.source.RenamableTokenType;
 import cuchaz.enigma.translation.TranslateResult;
 import cuchaz.enigma.translation.Translator;
@@ -16,15 +15,16 @@ import cuchaz.enigma.translation.mapping.EntryMapping;
  * Created by Thog
  * 19/10/2016
  */
-public class LocalVariableEntry extends ParentedEntry<MethodEntry> implements Comparable<LocalVariableEntry> {
+public class LocalVariableEntry extends ParentedEntry<MethodEntry> implements Comparable<LocalVariableEntry>, LocalVariableEntryView {
 	protected final int index;
 	protected final boolean parameter;
 
 	public LocalVariableEntry(MethodEntry parent, int index, String name, boolean parameter, String javadoc) {
-		super(parent, name, javadoc);
+		super(Objects.requireNonNull(parent, "Variable owner cannot be null"), name, javadoc);
 
-		Preconditions.checkNotNull(parent, "Variable owner cannot be null");
-		Preconditions.checkArgument(index >= 0, "Index must be positive");
+		if (index < 0) {
+			throw new IllegalArgumentException("Index must be positive");
+		}
 
 		this.index = index;
 		this.parameter = parameter;
@@ -35,10 +35,12 @@ public class LocalVariableEntry extends ParentedEntry<MethodEntry> implements Co
 		return MethodEntry.class;
 	}
 
+	@Override
 	public boolean isArgument() {
 		return this.parameter;
 	}
 
+	@Override
 	public int getIndex() {
 		return index;
 	}
@@ -49,7 +51,7 @@ public class LocalVariableEntry extends ParentedEntry<MethodEntry> implements Co
 	}
 
 	@Override
-	protected TranslateResult<LocalVariableEntry> extendedTranslate(Translator translator, @Nonnull EntryMapping mapping) {
+	protected TranslateResult<LocalVariableEntry> extendedTranslate(Translator translator, @NotNull EntryMapping mapping) {
 		String translatedName = mapping.targetName() != null ? mapping.targetName() : name;
 		String javadoc = mapping.javadoc();
 		return TranslateResult.of(mapping.targetName() == null ? RenamableTokenType.OBFUSCATED : RenamableTokenType.DEOBFUSCATED, new LocalVariableEntry(parent, index, translatedName, parameter, javadoc));

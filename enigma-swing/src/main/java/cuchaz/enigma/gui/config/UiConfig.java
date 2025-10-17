@@ -105,7 +105,7 @@ public final class UiConfig {
 	}
 
 	public static Decompiler getDecompiler() {
-		return ui.data().section("Decompiler").setIfAbsentEnum(Decompiler::valueOf, "Current", Decompiler.CFR);
+		return ui.data().section("Decompiler").setIfAbsentEnum(Decompiler::valueOf, "Current", Decompiler.VINEFLOWER);
 	}
 
 	public static void setDecompiler(Decompiler d) {
@@ -149,6 +149,14 @@ public final class UiConfig {
 
 	public static Color getDeobfuscatedOutlineColor() {
 		return getThemeColorRgba("Deobfuscated Outline");
+	}
+
+	public static Color getUnobfuscatedColor() {
+		return getThemeColorRgba("Unobfuscated");
+	}
+
+	public static Color getUnobfuscatedOutlineColor() {
+		return getThemeColorRgba("Unobfuscated Outline");
 	}
 
 	public static Color getEditorBackgroundColor() {
@@ -276,7 +284,7 @@ public final class UiConfig {
 	 * @return the fallback editor font
 	 */
 	public static Font getFallbackEditorFont() {
-		return ScaleUtil.scaleFont(Font.decode(Font.MONOSPACED));
+		return ScaleUtil.scaleFont(Font.decode(Font.MONOSPACED).deriveFont(12f));
 	}
 
 	public static String encodeFont(Font font) {
@@ -333,6 +341,14 @@ public final class UiConfig {
 		section.setInt(String.format("Y %s", screenSize.height), rect.y);
 	}
 
+	public static boolean isFullscreen(String window) {
+		return swing.data().section(window).setIfAbsentBool("Fullscreen", false);
+	}
+
+	public static void setFullscreen(String window, boolean fullscreen) {
+		swing.data().section(window).setBool("Fullscreen", fullscreen);
+	}
+
 	public static String getLastSelectedDir() {
 		return swing.data().section("File Dialog").getString("Selected").orElse("");
 	}
@@ -377,6 +393,10 @@ public final class UiConfig {
 			s.setIfAbsentDouble("Deobfuscated Alpha", 1.0);
 			s.setIfAbsentRgbColor("Deobfuscated Outline", 0x50A050);
 			s.setIfAbsentDouble("Deobfuscated Outline Alpha", 1.0);
+			s.setIfAbsentRgbColor("Unobfuscated", 0x7FAAFF);
+			s.setIfAbsentDouble("Unobfuscated Alpha", 1.0);
+			s.setIfAbsentRgbColor("Unobfuscated Outline", 0x183060);
+			s.setIfAbsentDouble("Unobfuscated Outline Alpha", 1.0);
 			s.setIfAbsentRgbColor("Editor Background", 0xFFFFFF);
 			s.setIfAbsentRgbColor("Highlight", 0x3333EE);
 			s.setIfAbsentRgbColor("Caret", 0x000000);
@@ -405,6 +425,10 @@ public final class UiConfig {
 			s.setIfAbsentDouble("Deobfuscated Alpha", 0.3);
 			s.setIfAbsentRgbColor("Deobfuscated Outline", 0x50FA7B);
 			s.setIfAbsentDouble("Deobfuscated Outline Alpha", 0.5);
+			s.setIfAbsentRgbColor("Unobfuscated", 0x3794FF);
+			s.setIfAbsentDouble("Unobfuscated Alpha", 0.3);
+			s.setIfAbsentRgbColor("Unobfuscated Outline", 0x3794FF);
+			s.setIfAbsentDouble("Unobfuscated Outline Alpha", 0.5);
 			s.setIfAbsentRgbColor("Editor Background", 0x282A36);
 			s.setIfAbsentRgbColor("Highlight", 0xFF79C6);
 			s.setIfAbsentRgbColor("Caret", 0xF8F8F2);

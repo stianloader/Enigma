@@ -1,11 +1,12 @@
 package cuchaz.enigma.gui.config.legacy;
 
 import java.awt.Color;
-import java.io.File;
+import java.io.BufferedReader;
 import java.lang.reflect.Type;
-import java.nio.charset.Charset;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.Locale;
 
-import com.google.common.io.Files;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.InstanceCreator;
@@ -40,9 +41,9 @@ public class Config {
 		}
 	}
 
-	private static final File DIR_HOME = new File(System.getProperty("user.home"));
-	private static final File ENIGMA_DIR = new File(DIR_HOME, ".enigma");
-	public static final File CONFIG_FILE = new File(ENIGMA_DIR, "config.json");
+	private static final Path DIR_HOME = Path.of(System.getProperty("user.home"));
+	private static final Path ENIGMA_DIR = DIR_HOME.resolve(".enigma");
+	public static final Path CONFIG_FILE = ENIGMA_DIR.resolve("config.json");
 
 	private final transient Gson gson; // transient to exclude it from being exposed
 
@@ -78,7 +79,7 @@ public class Config {
 
 	public float scaleFactor = 1.0f;
 
-	public Decompiler decompiler = Decompiler.CFR;
+	public Decompiler decompiler = Decompiler.VINEFLOWER;
 
 	public Config() {
 		gson = new GsonBuilder().registerTypeAdapter(Integer.class, new IntSerializer()).registerTypeAdapter(Integer.class, new IntDeserializer()).registerTypeAdapter(Config.class, (InstanceCreator<Config>) type -> this).setPrettyPrinting().create();
@@ -86,9 +87,9 @@ public class Config {
 	}
 
 	public void loadConfig() {
-		if (CONFIG_FILE.exists()) {
-			try {
-				gson.fromJson(Files.asCharSource(CONFIG_FILE, Charset.defaultCharset()).read(), Config.class);
+		if (Files.exists(CONFIG_FILE)) {
+			try (BufferedReader reader = Files.newBufferedReader(CONFIG_FILE)) {
+				gson.fromJson(reader, Config.class);
 			} catch (Exception e) {
 				e.printStackTrace();
 			}
@@ -98,7 +99,7 @@ public class Config {
 	private static class IntSerializer implements JsonSerializer<Integer> {
 		@Override
 		public JsonElement serialize(Integer src, Type typeOfSrc, JsonSerializationContext context) {
-			return new JsonPrimitive("#" + Integer.toHexString(src).toUpperCase());
+			return new JsonPrimitive("#" + Integer.toHexString(src).toUpperCase(Locale.ROOT));
 		}
 	}
 

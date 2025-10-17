@@ -1,7 +1,8 @@
 package cuchaz.enigma.classprovider;
 
-import javax.annotation.Nullable;
+import java.util.Collection;
 
+import org.jetbrains.annotations.Nullable;
 import org.objectweb.asm.ClassVisitor;
 import org.objectweb.asm.Opcodes;
 import org.objectweb.asm.tree.AbstractInsnNode;
@@ -36,6 +37,11 @@ public class ObfuscationFixClassProvider implements ClassProvider {
 	public ObfuscationFixClassProvider(ClassProvider classProvider, JarIndex jarIndex) {
 		this.classProvider = classProvider;
 		this.jarIndex = jarIndex;
+	}
+
+	@Override
+	public Collection<String> getClassNames() {
+		return classProvider.getClassNames();
 	}
 
 	@Override

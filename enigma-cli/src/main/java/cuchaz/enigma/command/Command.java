@@ -1,18 +1,23 @@
 package cuchaz.enigma.command;
 
 import java.io.File;
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.ArrayList;
+import java.util.List;
 
-import com.google.common.io.MoreFiles;
+import net.fabricmc.mappingio.MappingReader;
+import net.fabricmc.mappingio.tree.MemoryMappingTree;
+import net.fabricmc.mappingio.tree.VisitableMappingTree;
 
 import cuchaz.enigma.Enigma;
 import cuchaz.enigma.EnigmaProject;
 import cuchaz.enigma.ProgressListener;
-import cuchaz.enigma.classprovider.ClasspathClassProvider;
 import cuchaz.enigma.translation.mapping.EntryMapping;
-import cuchaz.enigma.translation.mapping.serde.MappingFormat;
+import cuchaz.enigma.translation.mapping.serde.MappingIoConverter;
+import cuchaz.enigma.translation.mapping.serde.MappingParseException;
 import cuchaz.enigma.translation.mapping.serde.MappingSaveParameters;
 import cuchaz.enigma.translation.mapping.tree.EntryTree;
 
@@ -29,19 +34,19 @@ public abstract class Command {
 
 	public abstract void run(String... args) throws Exception;
 
-	protected static EnigmaProject openProject(Path fileJarIn, Path fileMappings) throws Exception {
+	protected static EnigmaProject openProject(Path fileJarIn, Path fileMappings, List<Path> libraries) throws Exception {
 		ProgressListener progress = new ConsoleProgressListener();
 
 		Enigma enigma = Enigma.create();
 
 		System.out.println("Reading jar...");
-		EnigmaProject project = enigma.openJar(fileJarIn, new ClasspathClassProvider(), progress);
+		EnigmaProject project = enigma.openJar(fileJarIn, libraries, progress);
 
 		if (fileMappings != null) {
 			System.out.println("Reading mappings...");
 
 			MappingSaveParameters saveParameters = enigma.getProfile().getMappingSaveParameters();
-			EntryTree<EntryMapping> mappings = chooseEnigmaFormat(fileMappings).read(fileMappings, progress, saveParameters);
+			EntryTree<EntryMapping> mappings = readMappings(fileMappings, progress, saveParameters);
 
 			project.setMappings(mappings);
 		}
@@ -49,14 +54,13 @@ public abstract class Command {
 		return project;
 	}
 
-	protected static MappingFormat chooseEnigmaFormat(Path path) {
-		if (Files.isDirectory(path)) {
-			return MappingFormat.ENIGMA_DIRECTORY;
-		} else if ("zip".equalsIgnoreCase(MoreFiles.getFileExtension(path))) {
-			return MappingFormat.ENIGMA_ZIP;
-		} else {
-			return MappingFormat.ENIGMA_FILE;
-		}
+	protected static EntryTree<EntryMapping> readMappings(Path path, ProgressListener progress, MappingSaveParameters saveParameters) throws IOException, MappingParseException {
+		net.fabricmc.mappingio.format.MappingFormat format = MappingReader.detectFormat(path);
+		if (format == null) throw new IllegalArgumentException("Unknown mapping format!");
+
+		VisitableMappingTree tree = new MemoryMappingTree();
+		MappingReader.read(path, format, tree);
+		return MappingIoConverter.fromMappingIo(tree, progress, null);
 	}
 
 	protected static File getWritableFile(String path) {
@@ -131,6 +135,16 @@ public abstract class Command {
 		}
 
 		return args[i];
+	}
+
+	protected static List<Path> getReadablePaths(String[] args, int startingFrom) {
+		List<Path> paths = new ArrayList<>();
+
+		for (int i = startingFrom; i < args.length; i++) {
+			paths.add(getReadablePath(args[i]));
+		}
+
+		return paths;
 	}
 
 	public static class ConsoleProgressListener implements ProgressListener {

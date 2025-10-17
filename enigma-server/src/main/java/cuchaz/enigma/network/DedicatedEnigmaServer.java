@@ -5,12 +5,12 @@ import java.io.PrintWriter;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.List;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingDeque;
 import java.util.concurrent.TimeUnit;
 
-import com.google.common.io.MoreFiles;
 import joptsimple.OptionParser;
 import joptsimple.OptionSet;
 import joptsimple.OptionSpec;
@@ -20,7 +20,6 @@ import cuchaz.enigma.Enigma;
 import cuchaz.enigma.EnigmaProfile;
 import cuchaz.enigma.EnigmaProject;
 import cuchaz.enigma.ProgressListener;
-import cuchaz.enigma.classprovider.ClasspathClassProvider;
 import cuchaz.enigma.translation.mapping.EntryRemapper;
 import cuchaz.enigma.translation.mapping.serde.MappingFormat;
 import cuchaz.enigma.translation.mapping.serde.MappingParseException;
@@ -55,7 +54,9 @@ public class DedicatedEnigmaServer extends EnigmaServer {
 	public static void main(String[] args) {
 		OptionParser parser = new OptionParser();
 
-		OptionSpec<Path> jarOpt = parser.accepts("jar", "Jar file to open at startup").withRequiredArg().required().withValuesConvertedBy(PathConverter.INSTANCE);
+		OptionSpec<Path> jarOpt = parser.accepts("jar", "Jar file to open at startup; if there are multiple jars, the order must be the same between the server and all clients").withRequiredArg().required().withValuesConvertedBy(PathConverter.INSTANCE);
+
+		OptionSpec<Path> librariesOpt = parser.accepts("library", "Library file used by the jar").withRequiredArg().withValuesConvertedBy(PathConverter.INSTANCE);
 
 		OptionSpec<Path> mappingsOpt = parser.accepts("mappings", "Mappings file to open at startup").withRequiredArg().required().withValuesConvertedBy(PathConverter.INSTANCE);
 
@@ -68,7 +69,7 @@ public class DedicatedEnigmaServer extends EnigmaServer {
 		OptionSpec<Path> logFileOpt = parser.accepts("log", "The log file to write to").withRequiredArg().withValuesConvertedBy(PathConverter.INSTANCE).defaultsTo(Paths.get("log.txt"));
 
 		OptionSet parsedArgs = parser.parse(args);
-		Path jar = parsedArgs.valueOf(jarOpt);
+		List<Path> jars = parsedArgs.valuesOf(jarOpt);
 		Path mappingsFile = parsedArgs.valueOf(mappingsOpt);
 		Path profileFile = parsedArgs.valueOf(profileOpt);
 		int port = parsedArgs.valueOf(portOpt);
@@ -85,12 +86,12 @@ public class DedicatedEnigmaServer extends EnigmaServer {
 		DedicatedEnigmaServer server;
 
 		try {
-			byte[] checksum = Utils.zipSha1(parsedArgs.valueOf(jarOpt));
+			byte[] checksum = Utils.zipSha1(jars.toArray(new Path[0]));
 
 			EnigmaProfile profile = EnigmaProfile.read(profileFile);
 			Enigma enigma = Enigma.builder().setProfile(profile).build();
 			System.out.println("Indexing Jar...");
-			EnigmaProject project = enigma.openJar(jar, new ClasspathClassProvider(), ProgressListener.none());
+			EnigmaProject project = enigma.openJars(jars, parsedArgs.valuesOf(librariesOpt), ProgressListener.none());
 
 			MappingFormat mappingFormat = MappingFormat.ENIGMA_DIRECTORY;
 			EntryRemapper mappings;
@@ -102,13 +103,11 @@ public class DedicatedEnigmaServer extends EnigmaServer {
 
 				if (Files.isDirectory(mappingsFile)) {
 					mappingFormat = MappingFormat.ENIGMA_DIRECTORY;
-				} else if ("zip".equalsIgnoreCase(MoreFiles.getFileExtension(mappingsFile))) {
-					mappingFormat = MappingFormat.ENIGMA_ZIP;
 				} else {
 					mappingFormat = MappingFormat.ENIGMA_FILE;
 				}
 
-				mappings = EntryRemapper.mapped(project.getJarIndex(), mappingFormat.read(mappingsFile, ProgressListener.none(), profile.getMappingSaveParameters()));
+				mappings = EntryRemapper.mapped(project.getJarIndex(), mappingFormat.read(mappingsFile, ProgressListener.none(), profile.getMappingSaveParameters(), project.getJarIndex()));
 			}
 
 			PrintWriter log = new PrintWriter(Files.newBufferedWriter(logFile));

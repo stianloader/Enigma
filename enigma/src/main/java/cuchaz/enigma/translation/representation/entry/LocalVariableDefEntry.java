@@ -1,9 +1,10 @@
 package cuchaz.enigma.translation.representation.entry;
 
-import javax.annotation.Nonnull;
+import java.util.Objects;
 
-import com.google.common.base.Preconditions;
+import org.jetbrains.annotations.NotNull;
 
+import cuchaz.enigma.api.view.entry.LocalVariableDefEntryView;
 import cuchaz.enigma.source.RenamableTokenType;
 import cuchaz.enigma.translation.TranslateResult;
 import cuchaz.enigma.translation.Translator;
@@ -15,14 +16,13 @@ import cuchaz.enigma.translation.representation.TypeDescriptor;
  * Created by Thog
  * 19/10/2016
  */
-public class LocalVariableDefEntry extends LocalVariableEntry {
+public class LocalVariableDefEntry extends LocalVariableEntry implements LocalVariableDefEntryView {
 	protected final TypeDescriptor desc;
 
 	public LocalVariableDefEntry(MethodEntry ownerEntry, int index, String name, boolean parameter, TypeDescriptor desc, String javadoc) {
 		super(ownerEntry, index, name, parameter, javadoc);
-		Preconditions.checkNotNull(desc, "Variable desc cannot be null");
 
-		this.desc = desc;
+		this.desc = Objects.requireNonNull(desc, "Variable desc cannot be null");
 	}
 
 	public TypeDescriptor getDesc() {
@@ -30,7 +30,12 @@ public class LocalVariableDefEntry extends LocalVariableEntry {
 	}
 
 	@Override
-	protected TranslateResult<LocalVariableEntry> extendedTranslate(Translator translator, @Nonnull EntryMapping mapping) {
+	public String getDescriptor() {
+		return desc.toString();
+	}
+
+	@Override
+	protected TranslateResult<LocalVariableEntry> extendedTranslate(Translator translator, @NotNull EntryMapping mapping) {
 		TypeDescriptor translatedDesc = translator.translate(desc);
 		String translatedName = mapping.targetName() != null ? mapping.targetName() : name;
 		String javadoc = mapping.javadoc();

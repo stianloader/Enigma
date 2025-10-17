@@ -12,12 +12,12 @@
 package cuchaz.enigma.translation.representation.entry;
 
 import java.util.Arrays;
+import java.util.Objects;
 
-import javax.annotation.Nonnull;
-import javax.annotation.Nullable;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
-import com.google.common.base.Preconditions;
-
+import cuchaz.enigma.api.view.entry.ClassDefEntryView;
 import cuchaz.enigma.source.RenamableTokenType;
 import cuchaz.enigma.translation.TranslateResult;
 import cuchaz.enigma.translation.Translator;
@@ -25,7 +25,7 @@ import cuchaz.enigma.translation.mapping.EntryMapping;
 import cuchaz.enigma.translation.representation.AccessFlags;
 import cuchaz.enigma.translation.representation.Signature;
 
-public class ClassDefEntry extends ClassEntry implements DefEntry<ClassEntry> {
+public class ClassDefEntry extends ClassEntry implements DefEntry<ClassEntry>, ClassDefEntryView {
 	private final AccessFlags access;
 	private final Signature signature;
 	private final @Nullable ClassEntry superClass;
@@ -41,11 +41,9 @@ public class ClassDefEntry extends ClassEntry implements DefEntry<ClassEntry> {
 
 	public ClassDefEntry(ClassEntry parent, String className, Signature signature, AccessFlags access, @Nullable ClassEntry superClass, ClassEntry[] interfaces, String javadocs) {
 		super(parent, className, javadocs);
-		Preconditions.checkNotNull(signature, "Class signature cannot be null");
-		Preconditions.checkNotNull(access, "Class access cannot be null");
 
-		this.signature = signature;
-		this.access = access;
+		this.signature = Objects.requireNonNull(signature, "Class signature cannot be null");
+		this.access = Objects.requireNonNull(access, "Class access cannot be null");
 		this.superClass = superClass;
 		this.interfaces = interfaces != null ? interfaces : new ClassEntry[0];
 	}
@@ -65,11 +63,13 @@ public class ClassDefEntry extends ClassEntry implements DefEntry<ClassEntry> {
 		return access;
 	}
 
+	@Override
 	@Nullable
 	public ClassEntry getSuperClass() {
 		return superClass;
 	}
 
+	@Override
 	public ClassEntry[] getInterfaces() {
 		return interfaces;
 	}
@@ -79,7 +79,7 @@ public class ClassDefEntry extends ClassEntry implements DefEntry<ClassEntry> {
 	}
 
 	@Override
-	public TranslateResult<ClassDefEntry> extendedTranslate(Translator translator, @Nonnull EntryMapping mapping) {
+	public TranslateResult<ClassDefEntry> extendedTranslate(Translator translator, @NotNull EntryMapping mapping) {
 		Signature translatedSignature = translator.translate(signature);
 		String translatedName = mapping.targetName() != null ? mapping.targetName() : name;
 		AccessFlags translatedAccess = mapping.accessModifier().transform(access);

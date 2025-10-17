@@ -14,9 +14,10 @@ package cuchaz.enigma.translation.representation.entry;
 import java.util.List;
 import java.util.Objects;
 
-import javax.annotation.Nonnull;
-import javax.annotation.Nullable;
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
+import cuchaz.enigma.api.view.entry.ClassEntryView;
 import cuchaz.enigma.source.RenamableTokenType;
 import cuchaz.enigma.translation.TranslateResult;
 import cuchaz.enigma.translation.Translator;
@@ -25,7 +26,7 @@ import cuchaz.enigma.translation.mapping.IdentifierValidation;
 import cuchaz.enigma.translation.representation.TypeDescriptor;
 import cuchaz.enigma.utils.validation.ValidationContext;
 
-public class ClassEntry extends ParentedEntry<ClassEntry> implements Comparable<ClassEntry> {
+public class ClassEntry extends ParentedEntry<ClassEntry> implements Comparable<ClassEntry>, ClassEntryView {
 	private final String fullName;
 
 	public ClassEntry(String className) {
@@ -48,6 +49,10 @@ public class ClassEntry extends ParentedEntry<ClassEntry> implements Comparable<
 		if (parent == null && className.indexOf('.') >= 0) {
 			throw new IllegalArgumentException("Class name must be in JVM format. ie, path/to/package/class$inner : " + className);
 		}
+	}
+
+	public static ClassEntry parse(String name) {
+		return new ClassEntry(name);
 	}
 
 	@Override
@@ -86,7 +91,7 @@ public class ClassEntry extends ParentedEntry<ClassEntry> implements Comparable<
 	}
 
 	@Override
-	public TranslateResult<? extends ClassEntry> extendedTranslate(Translator translator, @Nonnull EntryMapping mapping) {
+	public TranslateResult<? extends ClassEntry> extendedTranslate(Translator translator, @NotNull EntryMapping mapping) {
 		if (name.charAt(0) == '[') {
 			TranslateResult<TypeDescriptor> translatedName = translator.extendedTranslate(new TypeDescriptor(name));
 			return translatedName.map(desc -> new ClassEntry(parent, desc.toString()));
@@ -162,7 +167,7 @@ public class ClassEntry extends ParentedEntry<ClassEntry> implements Comparable<
 		return parent;
 	}
 
-	@Nonnull
+	@NotNull
 	public ClassEntry getOutermostClass() {
 		if (parent == null) {
 			return this;

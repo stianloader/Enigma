@@ -13,23 +13,25 @@ package cuchaz.enigma.translation.mapping.serde.enigma;
 
 import java.io.IOException;
 import java.io.PrintWriter;
-import java.net.URI;
-import java.net.URISyntaxException;
 import java.nio.file.DirectoryStream;
-import java.nio.file.FileSystem;
-import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Collections;
+import java.util.HashSet;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import javax.annotation.Nonnull;
+import net.fabricmc.mappingio.MappingWriter;
+import net.fabricmc.mappingio.format.MappingFormat;
+import net.fabricmc.mappingio.tree.VisitOrder;
+import net.fabricmc.mappingio.tree.VisitableMappingTree;
+import org.jetbrains.annotations.ApiStatus;
+import org.jetbrains.annotations.NotNull;
 
 import cuchaz.enigma.ProgressListener;
 import cuchaz.enigma.translation.MappingTranslator;
@@ -41,10 +43,11 @@ import cuchaz.enigma.translation.mapping.VoidEntryResolver;
 import cuchaz.enigma.translation.mapping.serde.LfPrintWriter;
 import cuchaz.enigma.translation.mapping.serde.MappingFileNameFormat;
 import cuchaz.enigma.translation.mapping.serde.MappingHelper;
+import cuchaz.enigma.translation.mapping.serde.MappingIoConverter;
 import cuchaz.enigma.translation.mapping.serde.MappingSaveParameters;
-import cuchaz.enigma.translation.mapping.serde.MappingsWriter;
 import cuchaz.enigma.translation.mapping.tree.EntryTree;
 import cuchaz.enigma.translation.mapping.tree.EntryTreeNode;
+import cuchaz.enigma.translation.mapping.tree.HashEntryTree;
 import cuchaz.enigma.translation.representation.entry.ClassEntry;
 import cuchaz.enigma.translation.representation.entry.Entry;
 import cuchaz.enigma.translation.representation.entry.FieldEntry;
@@ -52,37 +55,17 @@ import cuchaz.enigma.translation.representation.entry.LocalVariableEntry;
 import cuchaz.enigma.translation.representation.entry.MethodEntry;
 import cuchaz.enigma.utils.I18n;
 
-public enum EnigmaMappingsWriter implements MappingsWriter {
-	FILE {
-		@Override
-		public void write(EntryTree<EntryMapping> mappings, MappingDelta<EntryMapping> delta, Path path, ProgressListener progress, MappingSaveParameters saveParameters) {
-			Collection<ClassEntry> classes = mappings.getRootNodes().filter(entry -> entry.getEntry() instanceof ClassEntry).map(entry -> (ClassEntry) entry.getEntry()).toList();
-
-			progress.init(classes.size(), I18n.translate("progress.mappings.enigma_file.writing"));
-
-			int steps = 0;
-
-			try (PrintWriter writer = new LfPrintWriter(Files.newBufferedWriter(path))) {
-				for (ClassEntry classEntry : classes) {
-					progress.step(steps++, classEntry.getFullName());
-					writeRoot(writer, mappings, classEntry);
-				}
-			} catch (IOException e) {
-				e.printStackTrace();
-			}
-		}
-	},
+public enum EnigmaMappingsWriter {
 	DIRECTORY {
 		@Override
-		public void write(EntryTree<EntryMapping> mappings, MappingDelta<EntryMapping> delta, Path path, ProgressListener progress, MappingSaveParameters saveParameters) {
+		@ApiStatus.Internal
+		public void write(EntryTree<EntryMapping> mappings, MappingDelta<EntryMapping> delta, Path path, ProgressListener progress, MappingSaveParameters saveParameters, boolean useMio) {
 			Collection<ClassEntry> changedClasses = delta.getChangedRoots().filter(entry -> entry instanceof ClassEntry).map(entry -> (ClassEntry) entry).toList();
 
 			applyDeletions(path, changedClasses, mappings, delta.getBaseMappings(), saveParameters.getFileNameFormat());
-
 			changedClasses = changedClasses.stream().filter(entry -> !isClassEmpty(mappings, entry)).collect(Collectors.toList());
 
-			progress.init(changedClasses.size(), I18n.translate("progress.mappings.enigma_directory.writing"));
-
+			progress.init(changedClasses.size(), I18n.translate("progress.mappings.writing"));
 			AtomicInteger steps = new AtomicInteger();
 
 			Translator translator = new MappingTranslator(mappings, VoidEntryResolver.INSTANCE);
@@ -100,8 +83,26 @@ public enum EnigmaMappingsWriter implements MappingsWriter {
 					Files.createDirectories(classPath.getParent());
 					Files.deleteIfExists(classPath);
 
-					try (PrintWriter writer = new LfPrintWriter(Files.newBufferedWriter(classPath))) {
-						writeRoot(writer, mappings, classEntry);
+					if (useMio) {
+						EntryTree<EntryMapping> currentMappings = new HashEntryTree<>();
+						Set<Entry<?>> children = new HashSet<>();
+						children.add(classEntry);
+
+						while (!children.isEmpty()) {
+							Entry<?> child = children.stream().findFirst().get();
+							children.remove(child);
+							children.addAll(mappings.getChildren(child));
+
+							EntryMapping mapping = mappings.get(child);
+							currentMappings.insert(child, mapping != null ? mapping : EntryMapping.DEFAULT);
+						}
+
+						VisitableMappingTree tree = MappingIoConverter.toMappingIo(currentMappings, ProgressListener.none());
+						tree.accept(MappingWriter.create(classPath, MappingFormat.ENIGMA_FILE), VisitOrder.createByName());
+					} else {
+						try (PrintWriter writer = new LfPrintWriter(Files.newBufferedWriter(classPath))) {
+							writeRoot(writer, mappings, classEntry);
+						}
 					}
 				} catch (Throwable t) {
 					System.err.println("Failed to write class '" + classEntry.getFullName() + "'");
@@ -167,18 +168,6 @@ public enum EnigmaMappingsWriter implements MappingsWriter {
 
 		private Path resolve(Path root, ClassEntry classEntry) {
 			return root.resolve(classEntry.getFullName() + ".mapping");
-		}
-	},
-	ZIP {
-		@Override
-		public void write(EntryTree<EntryMapping> mappings, MappingDelta<EntryMapping> delta, Path zip, ProgressListener progress, MappingSaveParameters saveParameters) {
-			try (FileSystem fs = FileSystems.newFileSystem(new URI("jar:file", null, zip.toUri().getPath(), ""), Collections.singletonMap("create", "true"))) {
-				DIRECTORY.write(mappings, delta, fs.getPath("/"), progress, saveParameters);
-			} catch (IOException e) {
-				e.printStackTrace();
-			} catch (URISyntaxException e) {
-				throw new RuntimeException("Unexpected error creating URI for " + zip, e);
-			}
 		}
 	};
 
@@ -266,7 +255,7 @@ public enum EnigmaMappingsWriter implements MappingsWriter {
 		return result;
 	}
 
-	protected String writeClass(ClassEntry entry, @Nonnull EntryMapping mapping) {
+	protected String writeClass(ClassEntry entry, @NotNull EntryMapping mapping) {
 		StringBuilder builder = new StringBuilder(EnigmaFormat.CLASS + " ");
 		builder.append(entry.getName()).append(' ');
 		writeMapping(builder, mapping);
@@ -274,7 +263,7 @@ public enum EnigmaMappingsWriter implements MappingsWriter {
 		return builder.toString();
 	}
 
-	protected String writeMethod(MethodEntry entry, @Nonnull EntryMapping mapping) {
+	protected String writeMethod(MethodEntry entry, @NotNull EntryMapping mapping) {
 		StringBuilder builder = new StringBuilder(EnigmaFormat.METHOD + " ");
 		builder.append(entry.getName()).append(' ');
 		writeMapping(builder, mapping);
@@ -284,7 +273,7 @@ public enum EnigmaMappingsWriter implements MappingsWriter {
 		return builder.toString();
 	}
 
-	protected String writeField(FieldEntry entry, @Nonnull EntryMapping mapping) {
+	protected String writeField(FieldEntry entry, @NotNull EntryMapping mapping) {
 		StringBuilder builder = new StringBuilder(EnigmaFormat.FIELD + " ");
 		builder.append(entry.getName()).append(' ');
 		writeMapping(builder, mapping);
@@ -294,7 +283,7 @@ public enum EnigmaMappingsWriter implements MappingsWriter {
 		return builder.toString();
 	}
 
-	protected String writeArgument(LocalVariableEntry entry, @Nonnull EntryMapping mapping) {
+	protected String writeArgument(LocalVariableEntry entry, @NotNull EntryMapping mapping) {
 		return EnigmaFormat.PARAMETER + " " + entry.getIndex() + ' ' + mapping.targetName();
 	}
 
@@ -326,5 +315,11 @@ public enum EnigmaMappingsWriter implements MappingsWriter {
 
 	private boolean isMappingEmpty(EntryMapping mapping) {
 		return mapping.targetName() == null && mapping.accessModifier() == AccessModifier.UNCHANGED && mapping.javadoc() == null;
+	}
+
+	@ApiStatus.Internal
+	public void write(EntryTree<EntryMapping> mappings, MappingDelta<EntryMapping> mappingDelta, Path path,
+			ProgressListener progressListener, MappingSaveParameters saveParameters, boolean useMio) {
+		throw new UnsupportedOperationException("Not implemented");
 	}
 }

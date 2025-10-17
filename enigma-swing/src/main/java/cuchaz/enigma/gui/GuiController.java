@@ -17,21 +17,23 @@ import java.io.FileWriter;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import javax.swing.JFrame;
 import javax.swing.JOptionPane;
 import javax.swing.SwingUtilities;
 
-import com.google.common.collect.Lists;
+import org.jetbrains.annotations.Nullable;
 
 import cuchaz.enigma.Enigma;
-import cuchaz.enigma.EnigmaProfile;
 import cuchaz.enigma.EnigmaProject;
 import cuchaz.enigma.analysis.ClassImplementationsTreeNode;
 import cuchaz.enigma.analysis.ClassInheritanceTreeNode;
@@ -44,10 +46,14 @@ import cuchaz.enigma.analysis.MethodInheritanceTreeNode;
 import cuchaz.enigma.analysis.MethodReferenceTreeNode;
 import cuchaz.enigma.analysis.StructureTreeNode;
 import cuchaz.enigma.analysis.StructureTreeOptions;
+import cuchaz.enigma.api.DataInvalidationEvent;
+import cuchaz.enigma.api.DataInvalidationListener;
 import cuchaz.enigma.api.service.ObfuscationTestService;
+import cuchaz.enigma.api.service.ProjectService;
+import cuchaz.enigma.api.view.GuiView;
+import cuchaz.enigma.api.view.entry.EntryReferenceView;
 import cuchaz.enigma.classhandle.ClassHandle;
 import cuchaz.enigma.classhandle.ClassHandleProvider;
-import cuchaz.enigma.classprovider.ClasspathClassProvider;
 import cuchaz.enigma.gui.config.NetConfig;
 import cuchaz.enigma.gui.config.UiConfig;
 import cuchaz.enigma.gui.dialog.ProgressDialog;
@@ -90,7 +96,7 @@ import cuchaz.enigma.utils.Utils;
 import cuchaz.enigma.utils.validation.PrintValidatable;
 import cuchaz.enigma.utils.validation.ValidationContext;
 
-public class GuiController implements ClientPacketHandler {
+public class GuiController implements ClientPacketHandler, GuiView, DataInvalidationListener {
 	private final Gui gui;
 	public final Enigma enigma;
 
@@ -98,7 +104,7 @@ public class GuiController implements ClientPacketHandler {
 	private IndexTreeBuilder indexTreeBuilder;
 
 	private Path loadedMappingPath;
-	private MappingFormat loadedMappingFormat;
+	private MappingFormat loadedMappingFormat = MappingFormat.ENIGMA_DIRECTORY;
 
 	private ClassHandleProvider chp;
 
@@ -109,30 +115,56 @@ public class GuiController implements ClientPacketHandler {
 
 	private History<EntryReference<Entry<?>, Entry<?>>> referenceHistory;
 
-	public GuiController(Gui gui, EnigmaProfile profile) {
+	public GuiController(Gui gui, Enigma enigma) {
 		this.gui = gui;
-		this.enigma = Enigma.builder().setProfile(profile).build();
+		this.enigma = enigma;
+	}
+
+	@Override
+	public EnigmaProject getProject() {
+		return project;
+	}
+
+	@Override
+	public JFrame getFrame() {
+		return gui.getFrame();
 	}
 
 	public boolean isDirty() {
 		return project != null && project.getMapper().isDirty();
 	}
 
-	public CompletableFuture<Void> openJar(final Path jarPath) {
+	public CompletableFuture<Void> openJar(final List<Path> jarPaths, final List<Path> libraries) {
 		this.gui.onStartOpenJar();
 
 		return ProgressDialog.runOffThread(gui.getFrame(), progress -> {
-			project = enigma.openJar(jarPath, new ClasspathClassProvider(), progress);
+			project = enigma.openJars(jarPaths, libraries, progress, false);
+			project.addDataInvalidationListener(this);
 			indexTreeBuilder = new IndexTreeBuilder(project.getJarIndex());
 			chp = new ClassHandleProvider(project, UiConfig.getDecompiler().service);
 			SwingUtilities.invokeLater(() -> {
-				gui.onFinishOpenJar(jarPath.getFileName().toString());
+				for (ProjectService projectService : enigma.getServices().get(ProjectService.TYPE)) {
+					projectService.onProjectOpen(project);
+				}
+
+				gui.onFinishOpenJar(getFileNames(jarPaths));
 				refreshClasses();
 			});
 		});
 	}
 
+	private static String getFileNames(List<Path> jarPaths) {
+		return jarPaths.stream()
+				.map(Path::getFileName)
+				.map(Object::toString)
+				.collect(Collectors.joining(", "));
+	}
+
 	public void closeJar() {
+		for (ProjectService projectService : enigma.getServices().get(ProjectService.TYPE)) {
+			projectService.onProjectClose(project);
+		}
+
 		this.chp.destroy();
 		this.chp = null;
 		this.project = null;
@@ -149,15 +181,13 @@ public class GuiController implements ClientPacketHandler {
 		return ProgressDialog.runOffThread(gui.getFrame(), progress -> {
 			try {
 				MappingSaveParameters saveParameters = enigma.getProfile().getMappingSaveParameters();
-
-				EntryTree<EntryMapping> mappings = format.read(path, progress, saveParameters);
-				project.setMappings(mappings);
+				project.setMappings(format.read(path, progress, saveParameters, project.getJarIndex()));
 
 				loadedMappingFormat = format;
 				loadedMappingPath = path;
 
 				refreshClasses();
-				chp.invalidateJavadoc();
+				project.invalidateData(DataInvalidationEvent.InvalidationType.JAVADOC);
 			} catch (MappingParseException e) {
 				JOptionPane.showMessageDialog(gui.getFrame(), e.getMessage());
 			}
@@ -172,7 +202,11 @@ public class GuiController implements ClientPacketHandler {
 
 		project.setMappings(mappings);
 		refreshClasses();
-		chp.invalidateJavadoc();
+		project.invalidateData(DataInvalidationEvent.InvalidationType.JAVADOC);
+	}
+
+	public MappingFormat getLoadedMappingFormat() {
+		return loadedMappingFormat;
 	}
 
 	public CompletableFuture<Void> saveMappings(Path path) {
@@ -222,21 +256,20 @@ public class GuiController implements ClientPacketHandler {
 
 		this.gui.setMappingsFile(null);
 		refreshClasses();
-		chp.invalidateJavadoc();
+		project.invalidateData(DataInvalidationEvent.InvalidationType.JAVADOC);
 	}
 
 	public void reloadAll() {
-		Path jarPath = this.project.getJarPath();
+		List<Path> jarPaths = this.project.getJarPaths();
+		List<Path> libraryPaths = this.project.getLibraryPaths();
 		MappingFormat loadedMappingFormat = this.loadedMappingFormat;
 		Path loadedMappingPath = this.loadedMappingPath;
 
-		if (jarPath != null) {
-			this.closeJar();
-			CompletableFuture<Void> f = this.openJar(jarPath);
+		this.closeJar();
+		CompletableFuture<Void> f = this.openJar(jarPaths, libraryPaths);
 
-			if (loadedMappingFormat != null && loadedMappingPath != null) {
-				f.whenComplete((v, t) -> this.openMappings(loadedMappingFormat, loadedMappingPath));
-			}
+		if (loadedMappingFormat != null && loadedMappingPath != null) {
+			f.whenComplete((v, t) -> this.openMappings(loadedMappingFormat, loadedMappingPath));
 		}
 	}
 
@@ -265,7 +298,7 @@ public class GuiController implements ClientPacketHandler {
 
 		return ProgressDialog.runOffThread(this.gui.getFrame(), progress -> {
 			EnigmaProject.JarExport jar = project.exportRemappedJar(progress);
-			jar.decompileStream(progress, chp.getDecompilerService(), EnigmaProject.DecompileErrorStrategy.TRACE_AS_SOURCE).forEach(source -> {
+			jar.decompileStream(project, progress, chp.getDecompilerService(), EnigmaProject.DecompileErrorStrategy.TRACE_AS_SOURCE).forEach(source -> {
 				try {
 					source.writeTo(source.resolvePath(path));
 				} catch (IOException e) {
@@ -308,6 +341,12 @@ public class GuiController implements ClientPacketHandler {
 		} catch (InterruptedException | ExecutionException e) {
 			throw new RuntimeException(e);
 		}
+	}
+
+	@Override
+	@Nullable
+	public EntryReferenceView getCursorReference() {
+		return gui.getCursorReference();
 	}
 
 	/**
@@ -393,8 +432,8 @@ public class GuiController implements ClientPacketHandler {
 			return;
 		}
 
-		List<ClassEntry> obfClasses = Lists.newArrayList();
-		List<ClassEntry> deobfClasses = Lists.newArrayList();
+		List<ClassEntry> obfClasses = new ArrayList<>();
+		List<ClassEntry> deobfClasses = new ArrayList<>();
 		this.addSeparatedClasses(obfClasses, deobfClasses);
 		this.gui.setObfClasses(obfClasses);
 		this.gui.setDeobfClasses(deobfClasses);
@@ -531,7 +570,7 @@ public class GuiController implements ClientPacketHandler {
 
 		Entry<?> target = change.getTarget();
 		EntryMapping prev = this.project.getMapper().getDeobfMapping(target);
-		EntryMapping mapping = EntryUtil.applyChange(vc, this.project.getMapper(), change);
+		EntryMapping mapping = EntryUtil.applyChange(vc, this.project, this.project.getMapper(), change);
 
 		boolean renamed = !change.getDeobfName().isUnchanged();
 
@@ -539,12 +578,11 @@ public class GuiController implements ClientPacketHandler {
 			this.gui.moveClassTree(target, prev.targetName() == null, mapping.targetName() == null);
 		}
 
-		if (!Objects.equals(prev.targetName(), mapping.targetName())) {
-			this.chp.invalidateMapped();
-		}
-
 		if (!Objects.equals(prev.javadoc(), mapping.javadoc())) {
-			this.chp.invalidateJavadoc(target.getTopLevelClass());
+			project.invalidateData(target.getTopLevelClass().getFullName(), DataInvalidationEvent.InvalidationType.JAVADOC);
+			// invalidateJavadoc implies invalidateMapped, so no need to check for that too
+		} else if (!Objects.equals(prev.targetName(), mapping.targetName())) {
+			project.invalidateData(DataInvalidationEvent.InvalidationType.MAPPINGS);
 		}
 
 		gui.showStructure(gui.getActiveEditor());
@@ -642,5 +680,36 @@ public class GuiController implements ClientPacketHandler {
 	@Override
 	public void updateUserList(List<String> users) {
 		gui.setUserList(users);
+	}
+
+	@Override
+	public void onDataInvalidated(DataInvalidationEvent event) {
+		Objects.requireNonNull(project, "Invalidating data when no project is open");
+
+		if (event.getClasses() == null) {
+			switch (event.getType()) {
+			case MAPPINGS -> chp.invalidateMapped();
+			case JAVADOC -> chp.invalidateJavadoc();
+			case DECOMPILE -> chp.invalidate();
+			}
+		} else {
+			switch (event.getType()) {
+			case MAPPINGS -> {
+				for (String clazz : event.getClasses()) {
+					chp.invalidateMapped(new ClassEntry(clazz));
+				}
+			}
+			case JAVADOC -> {
+				for (String clazz : event.getClasses()) {
+					chp.invalidateJavadoc(new ClassEntry(clazz));
+				}
+			}
+			case DECOMPILE -> {
+				for (String clazz : event.getClasses()) {
+					chp.invalidate(new ClassEntry(clazz));
+				}
+			}
+			}
+		}
 	}
 }

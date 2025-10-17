@@ -23,7 +23,6 @@ import java.util.concurrent.CompletableFuture;
 import java.util.function.Consumer;
 import java.util.function.Function;
 
-import javax.annotation.Nullable;
 import javax.swing.AbstractAction;
 import javax.swing.DefaultListModel;
 import javax.swing.JButton;
@@ -42,9 +41,11 @@ import javax.swing.SwingUtilities;
 import javax.swing.WindowConstants;
 import javax.swing.tree.DefaultMutableTreeNode;
 
+import org.jetbrains.annotations.Nullable;
+
 import cuchaz.enigma.Enigma;
-import cuchaz.enigma.EnigmaProfile;
 import cuchaz.enigma.analysis.EntryReference;
+import cuchaz.enigma.api.service.GuiService;
 import cuchaz.enigma.gui.config.Themes;
 import cuchaz.enigma.gui.config.UiConfig;
 import cuchaz.enigma.gui.dialog.JavadocDialog;
@@ -63,6 +64,7 @@ import cuchaz.enigma.gui.panels.IdentifierPanel;
 import cuchaz.enigma.gui.panels.ObfPanel;
 import cuchaz.enigma.gui.panels.StructurePanel;
 import cuchaz.enigma.gui.renderer.MessageListCellRenderer;
+import cuchaz.enigma.gui.util.ExtensionFileFilter;
 import cuchaz.enigma.gui.util.GuiUtil;
 import cuchaz.enigma.gui.util.LanguageUtil;
 import cuchaz.enigma.gui.util.ScaleUtil;
@@ -117,15 +119,14 @@ public class Gui {
 	private final JLabel connectionStatusLabel = new JLabel();
 
 	public final JFileChooser jarFileChooser = new JFileChooser();
-	public final JFileChooser tinyMappingsFileChooser = new JFileChooser();
-	public final JFileChooser enigmaMappingsFileChooser = new JFileChooser();
+	public final JFileChooser mappingsFileChooser = new JFileChooser();
 	public final JFileChooser exportSourceFileChooser = new JFileChooser();
 	public final JFileChooser exportJarFileChooser = new JFileChooser();
 	public SearchDialog searchDialog;
 
-	public Gui(EnigmaProfile profile, Set<EditableType> editableTypes) {
+	public Gui(Enigma enigma, Set<EditableType> editableTypes) {
 		this.editableTypes = editableTypes;
-		this.controller = new GuiController(this, profile);
+		this.controller = new GuiController(this, enigma);
 		this.structurePanel = new StructurePanel(this);
 		this.deobfPanel = new DeobfPanel(this);
 		this.infoPanel = new IdentifierPanel(this);
@@ -142,15 +143,16 @@ public class Gui {
 		LanguageUtil.addListener(this::retranslateUi);
 		Themes.addListener((lookAndFeel, boxHighlightPainters) -> SwingUtilities.updateComponentTreeUI(this.getFrame()));
 
+		for (GuiService guiService : enigma.getServices().get(GuiService.TYPE)) {
+			guiService.onStart(controller);
+		}
+
 		this.mainWindow.setVisible(true);
 	}
 
 	private void setupUi() {
 		this.jarFileChooser.setFileSelectionMode(JFileChooser.FILES_ONLY);
-		this.tinyMappingsFileChooser.setFileSelectionMode(JFileChooser.FILES_ONLY);
-
-		this.enigmaMappingsFileChooser.setFileSelectionMode(JFileChooser.FILES_AND_DIRECTORIES);
-		this.enigmaMappingsFileChooser.setAcceptAllFileFilterUsed(false);
+		this.jarFileChooser.setMultiSelectionEnabled(true);
 
 		this.exportSourceFileChooser.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
 		this.exportSourceFileChooser.setAcceptAllFileFilterUsed(false);
@@ -217,6 +219,7 @@ public class Gui {
 		frame.addWindowListener(GuiUtil.onWindowClose(e -> this.close()));
 
 		frame.setSize(UiConfig.getWindowSize("Main Window", ScaleUtil.getDimension(1024, 576)));
+		frame.setExtendedState(UiConfig.isFullscreen("Main Window") ? JFrame.MAXIMIZED_BOTH : JFrame.NORMAL);
 		frame.setMinimumSize(ScaleUtil.getDimension(640, 480));
 		frame.setDefaultCloseOperation(WindowConstants.DO_NOTHING_ON_CLOSE);
 
@@ -321,7 +324,7 @@ public class Gui {
 	}
 
 	public void setMappingsFile(Path path) {
-		this.enigmaMappingsFileChooser.setSelectedFile(path != null ? path.toFile() : null);
+		this.mappingsFileChooser.setSelectedFile(path != null ? path.toFile() : null);
 		updateUiState();
 	}
 
@@ -417,7 +420,7 @@ public class Gui {
 			return;
 		}
 
-		Entry<?> obfEntry = cursorReference.entry;
+		Entry<?> obfEntry = cursorReference.getNameableEntry();
 		toggleMappingFromEntry(obfEntry);
 	}
 
@@ -435,8 +438,10 @@ public class Gui {
 	}
 
 	public CompletableFuture<Void> saveMapping() {
-		if (this.enigmaMappingsFileChooser.getSelectedFile() != null || this.enigmaMappingsFileChooser.showSaveDialog(this.mainWindow.frame()) == JFileChooser.APPROVE_OPTION) {
-			return this.controller.saveMappings(this.enigmaMappingsFileChooser.getSelectedFile().toPath());
+		ExtensionFileFilter.setupFileChooser(this.mappingsFileChooser, this.controller.getLoadedMappingFormat());
+
+		if (this.mappingsFileChooser.getSelectedFile() != null || this.mappingsFileChooser.showSaveDialog(this.mainWindow.frame()) == JFileChooser.APPROVE_OPTION) {
+			return this.controller.saveMappings(ExtensionFileFilter.getSavePath(this.mappingsFileChooser));
 		}
 
 		return CompletableFuture.completedFuture(null);
@@ -464,6 +469,7 @@ public class Gui {
 	private void exit() {
 		UiConfig.setWindowPos("Main Window", this.mainWindow.frame().getLocationOnScreen());
 		UiConfig.setWindowSize("Main Window", this.mainWindow.frame().getSize());
+		UiConfig.setFullscreen("Main Window", this.mainWindow.frame().getExtendedState() == JFrame.MAXIMIZED_BOTH);
 		UiConfig.setLayout(this.splitClasses.getDividerLocation(), this.splitCenter.getDividerLocation(), this.splitRight.getDividerLocation(), this.logSplit.getDividerLocation());
 		UiConfig.save();
 

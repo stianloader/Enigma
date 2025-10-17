@@ -11,7 +11,7 @@ import org.benf.cfr.reader.util.CannotLoadClassException;
 import org.benf.cfr.reader.util.collections.ListFactory;
 import org.benf.cfr.reader.util.getopt.Options;
 import org.benf.cfr.reader.util.getopt.OptionsImpl;
-import org.checkerframework.checker.nullness.qual.Nullable;
+import org.jetbrains.annotations.Nullable;
 
 import cuchaz.enigma.source.Source;
 import cuchaz.enigma.source.SourceIndex;
@@ -82,7 +82,7 @@ public class CfrSource implements Source {
 		TypeUsageCollectingDumper typeUsageCollector = new TypeUsageCollectingDumper(options, tree);
 		tree.analyseTop(state, typeUsageCollector);
 
-		EnigmaDumper dumper = new EnigmaDumper(new StringBuilder(), settings, typeUsageCollector.getRealTypeUsageInformation(), options, mapper);
+		CfrDumper dumper = new CfrDumper(new StringBuilder(), settings, typeUsageCollector.getRealTypeUsageInformation(), options, mapper);
 		tree.dump(state.getObfuscationMapping().wrap(dumper));
 		index = dumper.getIndex();
 	}

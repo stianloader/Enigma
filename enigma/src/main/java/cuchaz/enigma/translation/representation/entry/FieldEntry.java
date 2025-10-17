@@ -13,17 +13,16 @@ package cuchaz.enigma.translation.representation.entry;
 
 import java.util.Objects;
 
-import javax.annotation.Nonnull;
+import org.jetbrains.annotations.NotNull;
 
-import com.google.common.base.Preconditions;
-
+import cuchaz.enigma.api.view.entry.FieldEntryView;
 import cuchaz.enigma.source.RenamableTokenType;
 import cuchaz.enigma.translation.TranslateResult;
 import cuchaz.enigma.translation.Translator;
 import cuchaz.enigma.translation.mapping.EntryMapping;
 import cuchaz.enigma.translation.representation.TypeDescriptor;
 
-public class FieldEntry extends ParentedEntry<ClassEntry> implements Comparable<FieldEntry> {
+public class FieldEntry extends ParentedEntry<ClassEntry> implements Comparable<FieldEntry>, FieldEntryView {
 	protected final TypeDescriptor desc;
 
 	public FieldEntry(ClassEntry parent, String name, TypeDescriptor desc) {
@@ -31,12 +30,9 @@ public class FieldEntry extends ParentedEntry<ClassEntry> implements Comparable<
 	}
 
 	public FieldEntry(ClassEntry parent, String name, TypeDescriptor desc, String javadocs) {
-		super(parent, name, javadocs);
+		super(Objects.requireNonNull(parent, "Owner cannot be null"), name, javadocs);
 
-		Preconditions.checkNotNull(parent, "Owner cannot be null");
-		Preconditions.checkNotNull(desc, "Field descriptor cannot be null");
-
-		this.desc = desc;
+		this.desc = Objects.requireNonNull(desc, "Field descriptor cannot be null");
 	}
 
 	public static FieldEntry parse(String owner, String name, String desc) {
@@ -53,7 +49,16 @@ public class FieldEntry extends ParentedEntry<ClassEntry> implements Comparable<
 	}
 
 	@Override
+	public String getDescriptor() {
+		return this.desc.toString();
+	}
+
+	@Override
 	public FieldEntry withName(String name) {
+		return new FieldEntry(parent, name, desc, null);
+	}
+
+	public FieldEntry withDesc(TypeDescriptor desc) {
 		return new FieldEntry(parent, name, desc, null);
 	}
 
@@ -63,7 +68,7 @@ public class FieldEntry extends ParentedEntry<ClassEntry> implements Comparable<
 	}
 
 	@Override
-	protected TranslateResult<FieldEntry> extendedTranslate(Translator translator, @Nonnull EntryMapping mapping) {
+	protected TranslateResult<FieldEntry> extendedTranslate(Translator translator, @NotNull EntryMapping mapping) {
 		String translatedName = mapping.targetName() != null ? mapping.targetName() : name;
 		String docs = mapping.javadoc();
 		return TranslateResult.of(mapping.targetName() == null ? RenamableTokenType.OBFUSCATED : RenamableTokenType.DEOBFUSCATED, new FieldEntry(parent, translatedName, translator.translate(desc), docs));

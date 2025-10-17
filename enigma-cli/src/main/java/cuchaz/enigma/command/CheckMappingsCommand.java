@@ -1,6 +1,7 @@
 package cuchaz.enigma.command;
 
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -8,9 +9,7 @@ import cuchaz.enigma.Enigma;
 import cuchaz.enigma.EnigmaProject;
 import cuchaz.enigma.ProgressListener;
 import cuchaz.enigma.analysis.index.JarIndex;
-import cuchaz.enigma.classprovider.ClasspathClassProvider;
 import cuchaz.enigma.translation.mapping.EntryMapping;
-import cuchaz.enigma.translation.mapping.serde.MappingFormat;
 import cuchaz.enigma.translation.mapping.serde.MappingSaveParameters;
 import cuchaz.enigma.translation.mapping.tree.EntryTree;
 import cuchaz.enigma.translation.representation.entry.ClassEntry;
@@ -22,7 +21,7 @@ public class CheckMappingsCommand extends Command {
 
 	@Override
 	public String getUsage() {
-		return "<in jar> <mappings file>";
+		return "<in jar> <mappings file> [<libraries> ...]";
 	}
 
 	@Override
@@ -34,19 +33,17 @@ public class CheckMappingsCommand extends Command {
 	public void run(String... args) throws Exception {
 		Path fileJarIn = getReadableFile(getArg(args, 0, "in jar", true)).toPath();
 		Path fileMappings = getReadablePath(getArg(args, 1, "mappings file", true));
+		List<Path> libraries = getReadablePaths(args, 2);
 
 		Enigma enigma = Enigma.create();
 
 		System.out.println("Reading JAR...");
-
-		EnigmaProject project = enigma.openJar(fileJarIn, new ClasspathClassProvider(), ProgressListener.none());
+		EnigmaProject project = enigma.openJar(fileJarIn, libraries, ProgressListener.none());
 
 		System.out.println("Reading mappings...");
-
-		MappingFormat format = chooseEnigmaFormat(fileMappings);
 		MappingSaveParameters saveParameters = enigma.getProfile().getMappingSaveParameters();
 
-		EntryTree<EntryMapping> mappings = format.read(fileMappings, ProgressListener.none(), saveParameters);
+		EntryTree<EntryMapping> mappings = readMappings(fileMappings, ProgressListener.none(), saveParameters);
 		project.setMappings(mappings);
 
 		JarIndex idx = project.getJarIndex();
